@@ -48,8 +48,9 @@ var YouTubePlugin = class extends ExtractorPlugin {
     return ytdl.validateURL(url) || ytpl.validateID(url);
   }
   async resolve(url, options) {
+    const agent = this.#ytdlOptions.agent;
     if (ytpl.validateID(url)) {
-      const info = await ytpl(url, { limit: Infinity, requestOptions: { headers: { cookie: this.ytCookie } } });
+      const info = await ytpl(url, { limit: Infinity, requestOptions: { headers: { cookie: agent ? agent.jar.getCookieStringSync("https://www.youtube.com") : "" } } });
       return new YouTubePlaylist(this, info, options);
     }
     if (ytdl.validateURL(url)) {
@@ -60,7 +61,7 @@ var YouTubePlugin = class extends ExtractorPlugin {
   }
   async getStreamURL(song) {
     if (!song.url || !ytdl.validateURL(song.url)) throw new DisTubeError("CANNOT_RESOLVE_SONG", song);
-    const info = await ytdl.getInfo(song.url, this.ytdlOptions);
+    const info = await ytdl.getFullInfo(song.url, this.ytdlOptions) || {};
     if (!info.formats?.length) throw new DisTubeError("UNAVAILABLE_VIDEO");
     const newSong = new YouTubeSong(this, info, {});
     song.ageRestricted = newSong.ageRestricted;
@@ -74,8 +75,9 @@ var YouTubePlugin = class extends ExtractorPlugin {
     if (!format) throw new DisTubeError("UNPLAYABLE_FORMATS");
     return format.url;
   }
+
   async getRelatedSongs(song) {
-    return (song.related ? song.related : (await ytdl.getBasicInfo(song.url, this.ytdlOptions)).related_videos).filter((r) => r.id).map((r) => new YouTubeRelatedSong(this, r));
+    return (song.related ? song.related : (await ytdl.getBasicInfo(song.url, { ...this.ytdlOptions, requestOptions: { headers: { cookie: this.#ytdlOptions.agent ? this.#ytdlOptions.agent.jar.getCookieStringSync("https://www.youtube.com") : "" } } })).related_videos).filter((r) => r.id).map((r) => new YouTubeRelatedSong(this, r));
   }
   async searchSong(query, options) {
     const result = await this.search(query, { type: "video" /* VIDEO */, limit: 1 });
@@ -97,6 +99,7 @@ var YouTubePlugin = class extends ExtractorPlugin {
       options
     );
   }
+
   /**
    * Search for a song.
    *
@@ -109,17 +112,58 @@ var YouTubePlugin = class extends ExtractorPlugin {
    * @returns Array of results
    */
   async search(query, options = {}) {
-    const { items } = await ytsr(query, {
-      type: "video" /* VIDEO */,
-      limit: 10,
-      safeSearch: false,
-      ...options,
-      requestOptions: { headers: { cookie: this.ytCookie } }
-    });
+    const { items } = await ytsr(query, Object.assign(
+      {
+        type: options.type || "video" /* VIDEO */,
+        limit: options.limit || 10,
+        safeSearch: options.safeSearch || false,
+        requestOptions: { headers: { cookie: this.ytCookie } }
+      },
+      options
+    ));
     return items.map((i) => {
       if (i.type === "video") return new YouTubeSearchResultSong(this, i);
       return new YouTubeSearchResultPlaylist(i);
     });
+  }
+  async getSong(url, options) {
+    const song = await this.resolve(url, options);
+    if (!song) return null;
+    return song;
+  }
+  async getPlaylist(url, options) {
+    const playlist = await this.resolve(url, options);
+    if (!playlist || !(playlist instanceof YouTubePlaylist)) return null;
+    return playlist;
+  }
+  async getRelatedSongs(song) {
+    return (song.related ? song.related : (await ytdl.getBasicInfo(song.url, { ...this.ytdlOptions, requestOptions: { headers: { cookie: this.#ytdlOptions.agent ? this.#ytdlOptions.agent.jar.getCookieStringSync("https://www.youtube.com") : "" } } })).related_videos).filter((r) => r.id).map((r) => new YouTubeRelatedSong(this, r));
+  }
+  async searchSong(query, options) {
+    const result = await this.search(query, { type: "video" /* VIDEO */, limit: 1 });
+    if (!result?.[0]) return null;
+    const info = result[0];
+    return new Song(
+      {
+        plugin: this,
+        source: "youtube",
+        playFromSource: true,
+        id: info.id,
+        name: info.name,
+        url: info.url,
+        thumbnail: info.thumbnail,
+        duration: info.duration,
+        views: info.views,
+        uploader: info.uploader
+      },
+      options
+    );
+  }
+  async searchPlaylist(query, options) {
+    const result = await this.search(query, { type: "playlist" /* PLAYLIST */, limit: 1 });
+    if (!result?.[0]) return null;
+    const info = result[0];
+    return new YouTubePlaylist(this, info, options);
   }
 };
 var YouTubeSong = class extends Song {
@@ -274,3 +318,4 @@ export {
   YouTubeSearchResultSong,
   YouTubeSong
 };
+
