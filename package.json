@@ -26,5 +26,6 @@
     "@distube/ytsr": "^2.0.0",
     "@ybd-project/ytdl-core": "^5.0.20",
     "distube": "^5.0.2"
-  }
+  },
+  "homepage": "https://github.com/ToddyTheNoobDud/toddys-youtube#readme"
 }
