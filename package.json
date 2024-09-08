@@ -1,6 +1,6 @@
 {
   "name": "toddys-youtube",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "An fork of @distube/youtube, for memory optimization, etc",
   "main": "index.mjs",
   "scripts": {

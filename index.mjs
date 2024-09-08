@@ -272,6 +272,7 @@ var YouTubeRelatedSong = class extends Song {
         url: info.author?.channel_url || info.author?.external_channel_url || info.author?.user_url || info.author?.id ? `https://www.youtube.com/channel/${info.author.id}` : info.author?.user ? `https://www.youtube.com/${info.author.user}` : void 0
       }
     });
+    
   }
   destructor() {
     this.thumbnail = null;
