@@ -165,7 +165,11 @@ var YouTubePlugin = class extends ExtractorPlugin {
     const info = result[0];
     return new YouTubePlaylist(this, info, options);
   }
+  destructor() {
+    this.#ytdlOptions.agent = null;
+  }
 };
+
 var YouTubeSong = class extends Song {
   static {
     __name(this, "YouTubeSong");
@@ -199,6 +203,11 @@ var YouTubeSong = class extends Song {
     this.chapters = i.chapters || [];
     this.storyboards = i.storyboards || [];
     this.related = info.related_videos || [];
+  }
+  destructor() {
+    this.chapters = null;
+    this.storyboards = null;
+    this.related = null;
   }
 };
 var YouTubePlaylist = class extends Playlist {
@@ -235,6 +244,9 @@ var YouTubePlaylist = class extends Playlist {
       options
     );
   }
+  destructor() {
+    this.songs = null;
+  }
 };
 var YouTubeRelatedSong = class extends Song {
   static {
@@ -260,6 +272,10 @@ var YouTubeRelatedSong = class extends Song {
         url: info.author?.channel_url || info.author?.external_channel_url || info.author?.user_url || info.author?.id ? `https://www.youtube.com/channel/${info.author.id}` : info.author?.user ? `https://www.youtube.com/${info.author.user}` : void 0
       }
     });
+  }
+  destructor() {
+    this.thumbnail = null;
+    this.uploader = null;
   }
 };
 const YouTubeSearchResultSong = class extends Song {
