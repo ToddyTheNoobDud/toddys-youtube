@@ -6,22 +6,29 @@ var __name = (target, value) => __defProp(target, "name", { value, configurable:
 // src/index.ts
 import ytpl from "@distube/ytpl";
 import ytsr from "@distube/ytsr";
-import ytdl from "@ybd-project/ytdl-core";
+import { YtdlCore} from "@ybd-project/ytdl-core";
 
+const ytdl = new YtdlCore({
+  clients: ["android", "webCreator"],
+  disableDefaultClients: true,
+  quality: ["highestaudio"],
+  liveBuffer: 512 * 3, // thanks to voicemeeter xd
+})
 // src/util.ts
 function clone(obj) {
   return Array.isArray(obj) ? [...obj] : Object.assign({}, obj);
 }
 function toSecond(input) {
-  return input ? (typeof input === "string" ? +input.replace(/[^\d.]+/g, "") : input) || 0 : 0;
+  return input ? (typeof input === "string" ? +input.replace(/[^\d.]+/g, "") : input) :  input || 0;
 }
 __name(toSecond, "toSecond");
 function parseNumber(input) {
-  return input ? (typeof input === "string" ? +input.replace(/[^\d.]+/g, "") : input) || 0 : 0;
+  return input ? (typeof input === "string" ? +input.replace(/[^\d.]+/g, "") : input) : input || 0;
 }
 __name(parseNumber, "parseNumber");
 
 import { DisTubeError, ExtractorPlugin, Playlist, Song, checkInvalidKey } from "distube";
+
 var YouTubePlugin = class extends ExtractorPlugin {
   static {
     __name(this, "YouTubePlugin");
@@ -34,7 +41,7 @@ var YouTubePlugin = class extends ExtractorPlugin {
     checkInvalidKey(options, ["cookies", "ytdlOptions"], "YouTubePlugin");
     this.cookies = this.#cookies = options.cookies ? clone(options.cookies) : void 0;
     this.#ytdlOptions = options?.ytdlOptions ? clone(options.ytdlOptions) : {};
-    this.#ytdlOptions.agent = ytdl.createAgent(this.cookies);
+    this.#ytdlOptions.agent = this.cookies ? ytdl.createAgent(this.cookies) : undefined;
   }
   get ytdlOptions() {
     if (this.cookies !== this.#cookies) this.#ytdlOptions.agent = ytdl.createAgent(this.#cookies = this.cookies);
@@ -45,7 +52,7 @@ var YouTubePlugin = class extends ExtractorPlugin {
     return agent ? agent.jar.getCookieStringSync("https://www.youtube.com") : "";
   }
   validate(url) {
-    return ytdl.validateURL(url) || ytpl.validateID(url);
+    return ytdl.getBasicInfo(url);
   }
   async resolve(url, options) {
     const agent = this.#ytdlOptions.agent;
@@ -53,15 +60,12 @@ var YouTubePlugin = class extends ExtractorPlugin {
       const info = await ytpl(url, { limit: Infinity, requestOptions: { headers: { cookie: agent ? agent.jar.getCookieStringSync("https://www.youtube.com") : "" } } });
       return new YouTubePlaylist(this, info, options);
     }
-    if (ytdl.validateURL(url)) {
-      const info = await ytdl.getBasicInfo(url, this.ytdlOptions);
-      return new YouTubeSong(this, info, options);
-    }
+    if (ytdl.getBasicInfo(url)) return new YouTubeSong(this, await ytdl.getBasicInfo(url, this.ytdlOptions), options);
     throw new DisTubeError("CANNOT_RESOLVE_SONG", url);
   }
   async getStreamURL(song) {
-    if (!song.url || !ytdl.validateURL(song.url)) throw new DisTubeError("CANNOT_RESOLVE_SONG", song);
-    const info = await ytdl.getFullInfo(song.url, this.ytdlOptions) || {};
+    if (!song.url && !song.id) throw new DisTubeError("CANNOT_RESOLVE_SONG", song);
+    const info = await ytdl.getFullInfo(song.url, this.ytdlOptions || this.#ytdlOptions) || {};
     if (!info.formats?.length) throw new DisTubeError("UNAVAILABLE_VIDEO");
     const newSong = new YouTubeSong(this, info, {});
     song.ageRestricted = newSong.ageRestricted;
@@ -117,7 +121,7 @@ var YouTubePlugin = class extends ExtractorPlugin {
         type: options.type || "video" /* VIDEO */,
         limit: options.limit || 10,
         safeSearch: options.safeSearch || false,
-        requestOptions: { headers: { cookie: this.ytCookie } }
+        requestOptions: { headers: { cookie: this.ytCookie } },
       },
       options
     ));
@@ -187,7 +191,7 @@ var YouTubeSong = class extends Song {
         id: i.videoId,
         name: i.title,
         isLive: Boolean(i.isLive),
-        duration: i.isLive ? 0 : toSecond(i.lengthSeconds),
+        duration: i.isLive ? 0 : toSecond(i.lengthSeconds || i.length),
         url: i.video_url || `https://youtu.be/${i.videoId}`,
         thumbnail: i.thumbnails?.[0]?.url,
         views: parseNumber(i.viewCount || i.view_count || i.views),
@@ -224,7 +228,7 @@ var YouTubePlaylist = class extends Playlist {
         name: i.title,
         url: i.url,
         thumbnail: i.thumbnail,
-        duration: toSecond(i.duration),
+        duration: i.isLive ? 0 : toSecond(i.length_seconds),
         isLive: Boolean(i.isLive),
         uploader: {
           name: i.author?.name,
@@ -281,7 +285,7 @@ var YouTubeRelatedSong = class extends Song {
 };
 const YouTubeSearchResultSong = class extends Song {
   static __name = "YouTubeSearchResultSong";
-  constructor(plugin, { id, name, thumbnail, isLive, duration: rawDuration, views, author }) {
+  constructor(plugin, { id, name, thumbnail, isLive, duration, views, author }) {
     super({
       plugin,
       source: "youtube",
@@ -291,7 +295,7 @@ const YouTubeSearchResultSong = class extends Song {
       url: `https://youtu.be/${id}`,
       thumbnail,
       isLive,
-      duration: isLive ? 0 : toSecond(rawDuration),
+      duration: toSecond(duration) || duration,
       views: parseNumber(views),
       uploader: { name: author?.name, url: author?.url }
     });
@@ -324,7 +328,6 @@ const YouTubeSearchResultPlaylist = class {
     this.name = name;
     this.url = `https://www.youtube.com/playlist?list=${id}`;
     this.uploader = { name: owner?.name, url: owner?.url };
-    this.length = 0;
   }
 };
 export {
@@ -335,4 +338,3 @@ export {
   YouTubeSearchResultSong,
   YouTubeSong
 };
-
