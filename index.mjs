@@ -14,7 +14,9 @@ const ytdlCore = new YtdlCore({
   disableDefaultClients: true,
   quality: ["highestaudio"],
   notParsingHLSFormat: true,
-  liveBuffer: 512
+  liveBuffer: 512,
+  poToken: "MnQ1iLFvTT5DIzWwh-L2aLQJE4XcpxrrXwLeV5Rx6EqARNqxHYZVJ3FSfHAqnWmBxkpbLDBQSY_ZnoeEUcGcl9EW9xYjrJec_ETnEjRL6RcqvGZBKKLjpDXPTDHxYj7L_x2_DLYTF21KL9jIzi6gSHs8ua8bwA==",
+  visitorData: "CgtfVDUyejN6dGMwayjOmpa3BjIKCgJVUxIEGgAgHQ%3D%3D"
 });
 
 /**
@@ -162,119 +164,118 @@ var YouTubePlugin = class extends ExtractorPlugin {
   async getRelatedSongs(song) {
     return (song.related ? song.related : (await ytdl.getBasicInfo(song.url, { ...this.ytdlOptions, requestOptions: { headers: { cookie: this.#ytdlOptions.agent ? this.#ytdlOptions.agent.jar.getCookieStringSync("https://www.youtube.com") : "" } } })).related_videos).filter((r) => r.id).map((r) => new YouTubeRelatedSong(this, r));
   }
-  async searchSong(query, options) {
+ async searchSong(query, options) {
     const result = await this.search(query, { type: "video" /* VIDEO */, limit: 1 });
     if (!result?.[0]) return null;
+
     const info = result[0];
-    return new Song(
-      {
-        plugin: this,
-        source: "youtube",
-        playFromSource: true,
-        id: info.id,
-        name: info.name,
-        url: info.url,
-        thumbnail: info.thumbnail,
-        duration: info.duration,
-        views: info.views,
-        uploader: info.uploader
-      },
-      options
-    );
+    const song = new Song({
+      plugin: this,
+      source: "youtube",
+      playFromSource: true,
+      id: info.id,
+      name: info.name,
+      url: info.url,
+      thumbnail: info.thumbnail,
+      duration: info.duration,
+      views: info.views,
+      uploader: info.uploader
+    }, options);
+
+    if (info) {
+      Object.keys(info).forEach(key => info[key] = null);
+    }
+
+    return song;
   }
+
   async searchPlaylist(query, options) {
     const result = await this.search(query, { type: "playlist" /* PLAYLIST */, limit: 1 });
     if (!result?.[0]) return null;
-    const info = result[0];
-    return new YouTubePlaylist(this, info, options);
-  }
-  destructor() {
-    this.#ytdlOptions.agent = null;
-  }
-};
 
-var YouTubeSong = class extends Song {
-  static {
-    __name(this, "YouTubeSong");
+    const info = result[0];
+    const playlist = new YouTubePlaylist(this, info, options);
+    
+    if (info) {
+      Object.keys(info).forEach(key => info[key] = null);
+    }
+
+    return playlist;
   }
-  chapters;
-  storyboards;
-  related;
+
+  destructor() {
+      this.#ytdlOptions.agent = null
+
+    super.destructor(); 
+  }
+}
+var YouTubeSong = class extends Song {
   constructor(plugin, info, options) {
     const { videoDetails: i } = info;
-    super(
-      {
-        plugin,
-        source: "youtube",
-        playFromSource: true,
-        id: i.videoId,
-        name: i.title,
-        isLive: Boolean(i.isLive),
-        duration: i.isLive ? 0 : toSecond(i.lengthSeconds || i.length),
-        url: i.video_url || `https://youtu.be/${i.videoId}`,
-        thumbnail: i.thumbnails?.[0]?.url,
-        views: parseNumber(i.viewCount || i.view_count || i.views),
-        likes: parseNumber(i.likes),
-        uploader: {
-          name: i.author?.name || i.author?.user,
-          url: i.author?.channel_url || i.author?.external_channel_url || i.author?.user_url || i.author?.id ? `https://www.youtube.com/channel/${i.author.id}` : i.author?.user ? `https://www.youtube.com/${i.author.user}` : void 0
-        },
-        ageRestricted: Boolean(i.age_restricted)
+    super({
+      plugin,
+      source: "youtube",
+      playFromSource: true,
+      id: i.videoId,
+      name: i.title,
+      isLive: Boolean(i.isLive),
+      duration: i.isLive ? 0 : toSecond(i.lengthSeconds || i.length),
+      url: i.video_url || `https://youtu.be/${i.videoId}`,
+      thumbnail: i.thumbnails?.[0]?.url || null,
+      views: parseNumber(i.viewCount || i.view_count || i.views),
+      likes: parseNumber(i.likes),
+      uploader: {
+        name: i.author?.name || i.author?.user || null,
+        url: i.author?.channel ? `https://www.youtube.com/channel/${i.author.id}` : i.author?.user ? `https://www.youtube.com/${i.author.user}` : null
       },
-      options
-    );
-    this.chapters = i.chapters || [];
-    this.storyboards = i.storyboards || [];
-    this.related = info.related_videos || [];
+      ageRestricted: Boolean(i.age_restricted)
+    }, options);
+    this.chapters = i.chapters ? [...i.chapters] : [];
+    this.storyboards = i.storyboards ? [...i.storyboards] : []; 
+    this.related = info.related_videos ? [...info.related_videos] : []; 
   }
+
   destructor() {
-    this.chapters = null;
-    this.storyboards = null;
-    this.related = null;
+    this.chapters.length = 0;
+    this.storyboards.length = 0;
+    this.related.length = 0;
+    this.uploader.name = null;
+    this.uploader.url = null;
+    this.uploader = null;
+    super.destructor();
   }
-};
+}
 var YouTubePlaylist = class extends Playlist {
-  static {
-    __name(this, "YouTubePlaylist");
-  }
   constructor(plugin, info, options) {
-    const songs = info.items.map(
-      (i) => new Song({
-        plugin,
-        playFromSource: true,
-        source: "youtube",
-        id: i.id,
-        name: i.title,
-        url: i.url,
-        thumbnail: i.thumbnail,
-        duration: i.isLive ? 0 : toSecond(i.length_seconds),
-        isLive: Boolean(i.isLive),
-        uploader: {
-          name: i.author?.name,
-          url: i.author?.url || i.author?.channelID ? `https://www.youtube.com/channel/${i.author.channelID}` : void 0
-        }
-      })
-    );
-    super(
-      {
-        source: "youtube",
-        id: info.id,
-        name: info.title,
-        url: info.url,
-        thumbnail: info.thumbnail?.url,
-        songs
-      },
-      options
-    );
+    const songs = info.items.map(i => new Song({
+      plugin,
+      playFromSource: true,
+      source: "youtube",
+      id: i.id,
+      name: i.title,
+      url: i.url,
+      thumbnail: i.thumbnail,
+      duration: i.isLive ? 0 : toSecond(i.length_seconds),
+      isLive: Boolean(i.isLive),
+      uploader: { name: i.author?.name, url: i.author?.channelID ? `https://www.youtube.com/channel/${i.author.channelID}` : void 0 }
+    }));
+    super({
+      source: "youtube",
+      id: info.id,
+      name: info.title,
+      url: info.url,
+      thumbnail: info.thumbnail?.url,
+      songs
+    }, options);
   }
+  
   destructor() {
-    this.songs = null;
+    this.songs.forEach(song => song.destructor());
+    this.songs.length = 0;
+    super.destructor();
   }
-};
+}
 var YouTubeRelatedSong = class extends Song {
-  static {
-    __name(this, "YouTubeRelatedSong");
-  }
   constructor(plugin, info) {
     if (!info.id) throw new DisTubeError("CANNOT_RESOLVE_SONG", info);
     super({
@@ -284,26 +285,33 @@ var YouTubeRelatedSong = class extends Song {
       id: info.id,
       name: info.title,
       url: `https://youtu.be/${info.id}`,
-      thumbnail: info.thumbnails?.[0]?.url,
+      thumbnail: info.thumbnails?.[0]?.url || null, 
       isLive: Boolean(info.isLive),
       duration: info.isLive ? 0 : toSecond(info.length_seconds),
       views: parseNumber(info.view_count),
       uploader: typeof info.author === "string" ? {
         name: info.author
       } : {
-        name: info.author?.name || info.author?.user,
-        url: info.author?.channel_url || info.author?.external_channel_url || info.author?.user_url || info.author?.id ? `https://www.youtube.com/channel/${info.author.id}` : info.author?.user ? `https://www.youtube.com/${info.author.user}` : void 0
+        name: info.author?.name || info.author?.user || null,
+        url: info.author?.channel_url || info.author?.external_channel_url || info.author?.user_url || info.author?.id ? `https://www.youtube.com/channel/${info.author.id}` : info.author?.user ? `https://www.youtube.com/${info.author.user}` : null
       }
     });
-    
   }
+  
   destructor() {
-    this.thumbnail = null;
+    this.thumbnail = null; 
+    if (this.uploader) {
+      this.uploader.name = null;
+      this.uploader.url = null;
+    }
     this.uploader = null;
+    super.destructor();
   }
 };
+
 const YouTubeSearchResultSong = class extends Song {
   static __name = "YouTubeSearchResultSong";
+  
   constructor(plugin, { id, name, thumbnail, isLive, duration, views, author }) {
     super({
       plugin,
@@ -312,12 +320,29 @@ const YouTubeSearchResultSong = class extends Song {
       id,
       name,
       url: `https://youtu.be/${id}`,
-      thumbnail,
-      isLive,
+      thumbnail: thumbnail || null, 
+      isLive: Boolean(isLive), // Ensure isLive is a boolean
       duration: toSecond(duration) || duration,
       views: parseNumber(views),
-      uploader: { name: author?.name, url: author?.url }
+      uploader: {
+        name: (author && author.name) || null,
+        url: (author && author.url) ? author.url : null // Defaulting to null if no author URL
+      }
     });
+  }
+
+  destructor() {
+    this.id = null;
+    this.name = null;
+    this.url = null;
+    this.thumbnail = null;
+    this.isLive = null;
+    this.duration = null;
+    this.views = null;
+    this.uploader.name = null;
+    this.uploader.url = null;
+    this.uploader = null; 
+    super.destructor();
   }
 };
 const YouTubeSearchResultPlaylist = class {
