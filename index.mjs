@@ -34,12 +34,17 @@ function clone(obj) {
  * @param input - The duration string
  */
 function toSecond(input) {
-  if (!input) return 0;
-  if (typeof input !== "string") return Number(input) || 0;
-  const time = input.split(":").reverse();
   let seconds = 0;
-  for (let i = 0; i < 3; i++) if (time[i]) seconds += Number(time[i].replace(/[^\d.]+/g, "")) * Math.pow(60, i);
-  if (time.length > 3) seconds += Number(time[3].replace(/[^\d.]+/g, "")) * 24 * 60 * 60;
+  if (typeof input === "string") {
+    const time = input
+      .split(":")
+      .reverse()
+      .map((t) => Number(t.replace(/[^\d.]+/g, "")));
+    for (let i = 0; i < 3; i++) if (time[i]) seconds += time[i] * Math.pow(60, i);
+    if (time.length > 3) seconds += time[3] * 24 * 60 * 60;
+  } else {
+    seconds = Number(input) || 0;
+  }
   return seconds;
 }
 /**
@@ -74,12 +79,11 @@ var YouTubePlugin = class extends ExtractorPlugin {
     return ytdl.validateURL(url)
   }
   async resolve(url, options) {
-    if (ytpl.validateID(url)) {
-      const info = await ytpl(url, { limit: Infinity });
-      return new YouTubePlaylist(this, info, options);
-    }
-    if (ytdl.validateURL(url)) return new YouTubeSong(this, await ytdlCore.getBasicInfo(url, this.ytdlOptions), options);
-    throw new DisTubeError("CANNOT_RESOLVE_SONG", url);
+    return ytpl.validateID(url)
+      ? new YouTubePlaylist(this, await ytpl(url, { limit: Infinity }), options)
+      : ytdl.validateURL(url)
+      ? new YouTubeSong(this, await ytdlCore.getBasicInfo(url, this.ytdlOptions), options)
+      : null;
   }
   async getStreamURL(song) {
     if (!song.url && !song.id) throw new DisTubeError("CANNOT_RESOLVE_SONG", song);
@@ -122,9 +126,8 @@ var YouTubePlugin = class extends ExtractorPlugin {
     );
   }
   destructor() {
-    this.#ytdlOptions.agent = null;
+    this.#ytdlOptions = null;
   }
-
   /**
    * Search for a song.
    *
@@ -139,9 +142,9 @@ var YouTubePlugin = class extends ExtractorPlugin {
   async search(query, options = {}) {
     const { items } = await ytsr(query, Object.assign(
       {
-        type: options.type || "video" /* VIDEO */,
-        limit: options.limit || 10,
-        safeSearch: options.safeSearch || false,
+        type: options.type ?? "video" /* VIDEO */,
+        limit: options.limit ?? 10,
+        safeSearch: options.safeSearch ?? false,
         requestOptions: { headers: { cookie: this.ytCookie } },
       },
       options
@@ -153,22 +156,21 @@ var YouTubePlugin = class extends ExtractorPlugin {
   }
   async getSong(url, options) {
     const song = await this.resolve(url, options);
-    if (!song) return null;
-    return song;
+    return song ?? null;
   }
   async getPlaylist(url, options) {
     const playlist = await this.resolve(url, options);
-    if (!playlist || !(playlist instanceof YouTubePlaylist)) return null;
-    return playlist;
+    return playlist instanceof YouTubePlaylist ? playlist : null;
   }
   async getRelatedSongs(song) {
-    return (song.related ? song.related : (await ytdl.getBasicInfo(song.url, { ...this.ytdlOptions, requestOptions: { headers: { cookie: this.#ytdlOptions.agent ? this.#ytdlOptions.agent.jar.getCookieStringSync("https://www.youtube.com") : "" } } })).related_videos).filter((r) => r.id).map((r) => new YouTubeRelatedSong(this, r));
+    return (song.related ? song.related : (await ytdlCore.getBasicInfo(song.url, this.ytdlOptions)).related_videos).filter((r) => r.id).map((r) => new YouTubeRelatedSong(this, r));
   }
- async searchSong(query, options) {
-    const result = await this.search(query, { type: "video" /* VIDEO */, limit: 1 });
-    if (!result?.[0]) return null;
 
-    const info = result[0];
+  async searchSong(query, options) {
+    const result = await this.search(query, { type: "video" /* VIDEO */, limit: 1 });
+    const info = result?.[0];
+    if (!info) return null;
+
     const song = new Song({
       plugin: this,
       source: "youtube",
@@ -191,9 +193,9 @@ var YouTubePlugin = class extends ExtractorPlugin {
 
   async searchPlaylist(query, options) {
     const result = await this.search(query, { type: "playlist" /* PLAYLIST */, limit: 1 });
-    if (!result?.[0]) return null;
+    const info = result?.[0];
+    if (!info) return null;
 
-    const info = result[0];
     const playlist = new YouTubePlaylist(this, info, options);
     
     if (info) {
@@ -204,9 +206,8 @@ var YouTubePlugin = class extends ExtractorPlugin {
   }
 
   destructor() {
-      this.#ytdlOptions.agent = null
-
-    super.destructor(); 
+    this.#ytdlOptions.agent = null;
+    super.destructor();
   }
 }
 var YouTubeSong = class extends Song {
