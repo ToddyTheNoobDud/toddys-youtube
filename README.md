@@ -33,12 +33,13 @@ const distube = new DisTube(client, {
 # Changelog
 
 ```
-Version 1.0.4
+Version 1.0.5
 
-+ Updated @ybd-project/ytdl-core
-+ Fixed search, play, etc duration times
-+ Rewrited to work with @ybd-project/ytdl-core 5.1.1 !
-+ Fixed validateURL + createAgent not working with 5.1.1 !
-+ Added channels, quality and buffer
-+ Some others improvements i forgot.
++ Updated @ybd-project/ytdl-core for 5.1.5
++ Removed android and use ios (faster ig)
++ Optimized ram usage
++ Use validateURL from older @ybd-project/ytdl-core.
++ Removed cookies support (useless atm)
++ Fixed duration beign very wrong again
++ 
 ```

@@ -6,66 +6,82 @@ var __name = (target, value) => __defProp(target, "name", { value, configurable:
 // src/index.ts
 import ytpl from "@distube/ytpl";
 import ytsr from "@distube/ytsr";
-import { YtdlCore} from "@ybd-project/ytdl-core";
+import { YtdlCore } from "@ybd-project/ytdl-core";
+import ytdl from "@ybd-project/ytdl-core/old" // Support for ValidateURL :D
 
-const ytdl = new YtdlCore({
-  clients: ["android", "webCreator"],
+const ytdlCore = new YtdlCore({
+  clients: ["webCreator", "ios"],
   disableDefaultClients: true,
   quality: ["highestaudio"],
-  liveBuffer: 512 * 3, // thanks to voicemeeter xd
-})
-// src/util.ts
-function clone(obj) {
-  return Array.isArray(obj) ? [...obj] : Object.assign({}, obj);
-}
-function toSecond(input) {
-  return input ? (typeof input === "string" ? +input.replace(/[^\d.]+/g, "") : input) :  input || 0;
-}
-__name(toSecond, "toSecond");
-function parseNumber(input) {
-  return input ? (typeof input === "string" ? +input.replace(/[^\d.]+/g, "") : input) : input || 0;
-}
-__name(parseNumber, "parseNumber");
+  notParsingHLSFormat: true,
+  liveBuffer: 512
+});
 
+/**
+ * Clone an object.
+ *
+ * @param obj - The object to clone
+ */
+function clone(obj) {
+  return JSON.parse(JSON.stringify(obj));
+}
+
+/**
+ * Convert a duration string to seconds.
+ *
+ * @param input - The duration string
+ */
+function toSecond(input) {
+  if (!input) return 0;
+  if (typeof input !== "string") return Number(input) || 0;
+  const time = input.split(":").reverse();
+  let seconds = 0;
+  for (let i = 0; i < 3; i++) if (time[i]) seconds += Number(time[i].replace(/[^\d.]+/g, "")) * Math.pow(60, i);
+  if (time.length > 3) seconds += Number(time[3].replace(/[^\d.]+/g, "")) * 24 * 60 * 60;
+  return seconds;
+}
+/**
+ * Parse a number from a string.
+ *
+ * @param input - The string to parse
+ */
+function parseNumber(input) {
+  if (typeof input === "string") return Number(input.replace(/[^\d.]+/g, "")) || 0;
+  return Number(input) || 0;
+}
 import { DisTubeError, ExtractorPlugin, Playlist, Song, checkInvalidKey } from "distube";
 
 var YouTubePlugin = class extends ExtractorPlugin {
   static {
     __name(this, "YouTubePlugin");
   }
-  #cookies;
-  cookies;
   #ytdlOptions;
   constructor(options = {}) {
     super();
     checkInvalidKey(options, ["cookies", "ytdlOptions"], "YouTubePlugin");
-    this.cookies = this.#cookies = options.cookies ? clone(options.cookies) : void 0;
     this.#ytdlOptions = options?.ytdlOptions ? clone(options.ytdlOptions) : {};
-    this.#ytdlOptions.agent = this.cookies ? ytdl.createAgent(this.cookies) : undefined;
+    this.#ytdlOptions.agent = undefined;
   }
   get ytdlOptions() {
-    if (this.cookies !== this.#cookies) this.#ytdlOptions.agent = ytdl.createAgent(this.#cookies = this.cookies);
     return this.#ytdlOptions;
   }
   get ytCookie() {
-    const agent = this.#ytdlOptions.agent;
-    return agent ? agent.jar.getCookieStringSync("https://www.youtube.com") : "";
+    return "";
   }
   validate(url) {
-    return ytdl.getBasicInfo(url);
+    return ytdl.validateURL(url)
   }
   async resolve(url, options) {
-    const agent = this.#ytdlOptions.agent;
     if (ytpl.validateID(url)) {
-      const info = await ytpl(url, { limit: Infinity, requestOptions: { headers: { cookie: agent ? agent.jar.getCookieStringSync("https://www.youtube.com") : "" } } });
+      const info = await ytpl(url, { limit: Infinity });
       return new YouTubePlaylist(this, info, options);
     }
-    if (ytdl.getBasicInfo(url)) return new YouTubeSong(this, await ytdl.getBasicInfo(url, this.ytdlOptions), options);
+    if (ytdl.validateURL(url)) return new YouTubeSong(this, await ytdlCore.getBasicInfo(url, this.ytdlOptions), options);
     throw new DisTubeError("CANNOT_RESOLVE_SONG", url);
   }
   async getStreamURL(song) {
     if (!song.url && !song.id) throw new DisTubeError("CANNOT_RESOLVE_SONG", song);
-    const info = await ytdl.getFullInfo(song.url, this.ytdlOptions || this.#ytdlOptions) || {};
+    const info = await ytdlCore.getFullInfo(song.url, this.ytdlOptions) || {};
     if (!info.formats?.length) throw new DisTubeError("UNAVAILABLE_VIDEO");
     const newSong = new YouTubeSong(this, info, {});
     song.ageRestricted = newSong.ageRestricted;
@@ -81,7 +97,7 @@ var YouTubePlugin = class extends ExtractorPlugin {
   }
 
   async getRelatedSongs(song) {
-    return (song.related ? song.related : (await ytdl.getBasicInfo(song.url, { ...this.ytdlOptions, requestOptions: { headers: { cookie: this.#ytdlOptions.agent ? this.#ytdlOptions.agent.jar.getCookieStringSync("https://www.youtube.com") : "" } } })).related_videos).filter((r) => r.id).map((r) => new YouTubeRelatedSong(this, r));
+    return (song.related ? song.related : (await ytdlCore.getBasicInfo(song.url, this.ytdlOptions)).related_videos).filter((r) => r.id).map((r) => new YouTubeRelatedSong(this, r));
   }
   async searchSong(query, options) {
     const result = await this.search(query, { type: "video" /* VIDEO */, limit: 1 });
@@ -102,6 +118,9 @@ var YouTubePlugin = class extends ExtractorPlugin {
       },
       options
     );
+  }
+  destructor() {
+    this.#ytdlOptions.agent = null;
   }
 
   /**

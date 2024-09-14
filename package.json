@@ -1,6 +1,6 @@
 {
   "name": "toddys-youtube",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "An fork of @distube/youtube, for memory optimization, etc",
   "main": "index.mjs",
   "scripts": {
@@ -24,7 +24,7 @@
   "dependencies": {
     "@distube/ytpl": "^1.2.1",
     "@distube/ytsr": "^2.0.0",
-    "@ybd-project/ytdl-core": "^5.1.1",
+    "@ybd-project/ytdl-core": "^5.1.5",
     "distube": "^5.0.2"
   },
   "homepage": "https://github.com/ToddyTheNoobDud/toddys-youtube#readme"
