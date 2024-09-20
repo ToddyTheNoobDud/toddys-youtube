@@ -24,7 +24,7 @@
   "dependencies": {
     "@distube/ytpl": "^1.2.1",
     "@distube/ytsr": "^2.0.0",
-    "@ybd-project/ytdl-core": "^5.1.5",
+    "@ybd-project/ytdl-core": "^5.1.8",
     "distube": "^5.0.2"
   },
   "homepage": "https://github.com/ToddyTheNoobDud/toddys-youtube#readme"

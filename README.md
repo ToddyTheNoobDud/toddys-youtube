@@ -5,12 +5,13 @@ Fork of @distube/youtube
 
 Works with https://github.com/ybd-project/ytdl-core
 
-Optimized memory
+Optimized memory + cpu
 
 Faster (ig)
 
 Use module instead of commonJS
 
+Updated with latest youtube features (i hope so)
 
 # Installation
 
@@ -21,11 +22,11 @@ Use module instead of commonJS
 Creating the bot
 ```js
 import { DisTube } from 'distube'
-import { YouTubePlugin } from "toddys-youtube";
+import { ToddysPlugin } from "toddys-youtube";
 
 const distube = new DisTube(client, {
   plugins: [
-    new YouTubePlugin({}),
+    new ToddysPlugin({}),
   ],
 });
 ```
@@ -33,14 +34,13 @@ const distube = new DisTube(client, {
 # Changelog
 
 ```
-Version 1.0.6
+Version 1.0.7
 
-+ Fixed various memory leaks
-+ Fixed some cpu usage
-+ Auto clean memory for better usage 
-+ Made it dynamic (faster)
-+ Better memory usage (from 100-95 to 85-88)
-+ Optimized CPU by a bit (mine from 5% to 3-4.5%)
-+ Made search dynamic
-+ Auto set everything to null after finishing (helps idle memory usage)
++ Updated @ybd-project/ytdl-core to 5.1.8
++ Removed some depreacted stuff
++ Oops (fixed errors 403)
++ Made the code more faster and efficient
++ Optimized cpu and ram by more
++ Removed old usage from @ybd-project/ytdl-core
++ Renamed YoutubePlugin to ToddysPlugin
 ```
