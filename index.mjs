@@ -1,349 +1,244 @@
-  export const SearchResultType = "video" | "playlist";
+const { defineProperty, createAgent } = Object;
+const { DisTubeError, ExtractorPlugin, Playlist, Song, checkInvalidKey } = require("distube");
+const ytpl = require("@distube/ytpl");
+const ytsr = require("@distube/ytsr");
+const ytdl = require("@distube/ytdl-core");
 
-  var __defProp = Object.defineProperty;
-  var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
+const clone = (obj) => {
+  if (obj === null || typeof obj !== "object") return obj;
+  return Array.isArray(obj) ? obj.map(clone) : Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, clone(v)]));
+};
 
-  // src/index.ts
-  import ytpl from "@distube/ytpl";
-  import ytsr from "@distube/ytsr";
-  import { YtdlCore } from "@ybd-project/ytdl-core";
+const toSecond = (input) => {
+  if (!input) return 0;
+  if (typeof input !== "string") return Number(input) || 0;
+  const timeParts = input.split(":").reverse();
+  return timeParts.reduce((total, part, index) => total + (Number(part.replace(/[^\d.]+/g, "")) || 0) * Math.pow(60, index), 0);
+};
 
-  const ytdlCore = new YtdlCore({
-    clients: ["webCreator", "ios"],
-    disableDefaultClients: true,
-    quality: ["highestaudio"],
-    notParsingHLSFormat: true,
-    liveBuffer: 512,
-  });
+const parseNumber = (input) => Number(String(input).replace(/[^\d.]+/g, "")) || 0;
 
-  /**
-   * Clone an object.
-   *
-   * @param obj - The object to clone
-   */
-  function clone(obj) {
-    return JSON.parse(JSON.stringify(obj));
+class YouTubePlugin extends ExtractorPlugin {
+  #cookies;
+  #ytdlOptions;
+
+  constructor(options = {}) {
+    super();
+    checkInvalidKey(options, ["cookies", "ytdlOptions"], "YouTubePlugin");
+    this.#cookies = options.cookies ? clone(options.cookies) : undefined;
+    this.#ytdlOptions = options.ytdlOptions ? clone(options.ytdlOptions) : {};
+    this.#ytdlOptions.agent = createAgent(this.#cookies);
   }
 
-  /**
-   * Convert a duration string to seconds.
-   *
-   * @param input - The duration string
-   */
-  function toSecond(input) {
-    let seconds = 0;
-    if (typeof input === "string") {
-      const time = input
-        .split(":")
-        .reverse()
-        .map((t) => Number(t.replace(/[^\d.]+/g, "")));
-      for (let i = 0; i < 3; i++) if (time[i]) seconds += time[i] * Math.pow(60, i);
-      if (time.length > 3) seconds += time[3] * 24 * 60 * 60;
-    } else {
-      seconds = Number(input) || 0;
+  get ytdlOptions() {
+    if (this.#cookies !== this.#cookies) {
+      this.#ytdlOptions.agent = createAgent(this.#cookies);
     }
-    return seconds;
+    return this.#ytdlOptions;
   }
-  /**
-   * Parse a number from a string.
-   *
-   * @param input - The string to parse
-   */
-  function parseNumber(input) {
-    if (typeof input === "string") return Number(input.replace(/[^\d.]+/g, "")) || 0;
-    return Number(input) || 0;
+
+  get ytCookie() {
+    const agent = this.#ytdlOptions.agent;
+    return agent ? agent.jar.getCookieStringSync("https://www.youtube.com") : "";
   }
-  import { DisTubeError, ExtractorPlugin, Playlist, Song, checkInvalidKey } from "distube";
 
-  var ToddysPlugin = class extends ExtractorPlugin {
-    static {
-      __name(this, "ToddysPlugin");
-    }
-    #ytdlOptions;
-    constructor(options = {}) {
-      super();
-      checkInvalidKey(options, ["cookies", "ytdlOptions"], "ToddysPlugin");
-      this.#ytdlOptions = options?.ytdlOptions ? clone(options.ytdlOptions) : {};
-      this.#ytdlOptions.agent = undefined;
-    }
-    get ytdlOptions() {
-      return this.#ytdlOptions;
-    }
-    get ytCookie() {
-      return "";
-    }
-    validate(url) {
-      return YtdlCore.validateURL(url)
-    }
-    async resolve(url, options) {
-      if (ytpl.validateID(url)) {
-        return new YouTubePlaylist(this, await ytpl(url, { limit: Infinity }), options);
-      }
+  validate(url) {
+    return ytdl.validateURL(url) || ytpl.validateID(url);
+  }
 
-      const info = await ytdlCore.getBasicInfo(url, this.ytdlOptions);
-      if (!info) return null;
-
+  async resolve(url, options) {
+    if (ytpl.validateID(url)) {
+      const info = await ytpl(url, { limit: Infinity, requestOptions: { headers: { cookie: this.ytCookie } } });
+      return new YouTubePlaylist(this, info, options);
+    }
+    if (ytdl.validateURL(url)) {
+      const info = await ytdl.getBasicInfo(url, this.ytdlOptions);
       return new YouTubeSong(this, info, options);
     }
-
-    async getStreamURL(song) {
-      if (!song.url && !song.id) throw new DisTubeError("CANNOT_RESOLVE_SONG", song);
-      const info = await ytdlCore.getFullInfo(song.url, this.ytdlOptions) || {};
-      if (!info.formats?.length) throw new DisTubeError("UNAVAILABLE_VIDEO");
-
-      const newSong = new YouTubeSong(this, info, {});
-      song.ageRestricted = newSong.ageRestricted;
-      song.views = newSong.views;
-      song.likes = newSong.likes;
-      song.thumbnail = newSong.thumbnail;
-      song.related = newSong.related;
-      song.chapters = newSong.chapters;
-      song.storyboards = newSong.storyboards;
-
-      const formats = info.formats.filter((f) => f.hasAudio && (!newSong.isLive || f.isHLS));
-      if (!formats.length) throw new DisTubeError("UNPLAYABLE_FORMATS");
-
-      return formats.sort((a, b) => Number(b.audioBitrate) - Number(a.audioBitrate))[0].url;
-    }
-
-    async getRelatedSongs(song) {
-      const related = song.related || (await ytdlCore.getBasicInfo(song.url, this.ytdlOptions)).related_videos;
-      return related.filter(r => r.id).map(r => new YouTubeRelatedSong(this, r));
-    }
-
-    async searchSong(query, options) {
-      const result = (await this.search(query, { type: "video" /* VIDEO */, limit: 1 }))[0];
-      if (!result) return null;
-
-      return new Song(
-        {
-          plugin: this,
-          source: "youtube",
-          playFromSource: true,
-          id: result.id,
-          name: result.name,
-          url: result.url,
-          thumbnail: result.thumbnail,
-          duration: result.duration,
-          views: result.views,
-          uploader: result.uploader
-        },
-        options
-      );
-    }
-
-    /**
-     * Search for a song.
-     *
-     * @param query              - The string search for
-     * @param options            - Search options
-     * @param options.limit      - Limit the results
-     * @param options.type       - Type of results (`video` or `playlist`).
-     * @param options.safeSearch - Whether or not use safe search (YouTube restricted mode)
-     *
-     * @returns Array of results
-     */
-    async search(query, options = {}) {
-      const { items } = await ytsr(query, Object.assign(
-        {
-          type: options.type ?? "video" /* VIDEO */,
-          limit: options.limit ?? 10,
-          safeSearch: options.safeSearch ?? false,
-          requestOptions: { headers: { cookie: this.ytCookie } },
-        },
-        options
-      ));
-
-      return items.map(i => i.type === "video" ? new YouTubeSearchResultSong(this, i) : new YouTubeSearchResultPlaylist(i));
-    }
-
-    async getSong(url, options) {
-      return (await this.resolve(url, options)) ?? null;
-    }
-
-    async getPlaylist(url, options) {
-      return (await this.resolve(url, options)) instanceof YouTubePlaylist ? await this.resolve(url, options) : null;
-    }
-
-    async getRelatedSongs(song) {
-      return (song.related || (await ytdlCore.getBasicInfo(song.url, this.ytdlOptions)).related_videos).filter(r => r.id).map(r => new YouTubeRelatedSong(this, r));
-    }
-
-    destructor() {
-      this.#ytdlOptions.agent = null;
-      super.destructor();
-    }
+    throw new DisTubeError("CANNOT_RESOLVE_SONG", url);
   }
-  var YouTubeSong = class extends Song {
-    constructor(plugin, info, options) {
-      const { videoDetails: i } = info;
-      super({
-        plugin,
-        source: "youtube",
-        playFromSource: true,
-        id: i.videoId,
-        name: i.title,
-        isLive: Boolean(i.isLive),
-        duration: i.isLive ? 0 : toSecond(i.lengthSeconds || i.length),
-        url: i.video_url || `https://youtu.be/${i.videoId}`,
-        thumbnail: i.thumbnails?.[0]?.url || null,
-        views: parseNumber(i.viewCount || i.view_count || i.views),
-        likes: parseNumber(i.likes),
-        uploader: {
-          name: i.author?.name || i.author?.user || null,
-          url: i.author?.channel ? `https://www.youtube.com/channel/${i.author.id}` : i.author?.user ? `https://www.youtube.com/${i.author.user}` : null
-        },
-        ageRestricted: Boolean(i.age_restricted)
-      }, options);
-      this.chapters = i.chapters || [];
-      this.storyboards = i.storyboards || [];
-      this.related = info.related_videos || [];
-    }
 
-    destructor() {
-      this.chapters.length = 0;
-      this.storyboards.length = 0;
-      this.related.length = 0;
-      this.uploader.name = null;
-      this.uploader.url = null;
-      this.uploader = null;
-      super.destructor();
-    }
+  async getStreamURL(song) {
+    if (!song.url || !ytdl.validateURL(song.url)) throw new DisTubeError("CANNOT_RESOLVE_SONG", song);
+    const info = await ytdl.getInfo(song.url, this.ytdlOptions);
+    if (!info.formats?.length) throw new DisTubeError("UNAVAILABLE_VIDEO");
+    
+    Object.assign(song, {
+      ageRestricted: info.ageRestricted,
+      views: info.views,
+      likes: info.likes,
+      thumbnail: info.thumbnail,
+      related: info.related,
+      chapters: info.chapters,
+      storyboards: info.storyboards,
+    });
+
+    const format = info.formats
+      .filter(f => f.hasAudio && (!song.isLive || f.isHLS))
+      .sort((a, b) => (b.audioBitrate || 0) - (a.audioBitrate || 0) || (b.bitrate || 0) - (a.bitrate || 0))[0];
+
+    if (!format) throw new DisTubeError("UNPLAYABLE_FORMATS");
+    return format.url;
   }
-  var YouTubePlaylist = class extends Playlist {
-    constructor(plugin, info, options) {
-      const songs = info.items.map(i => new Song({
-        plugin,
-        playFromSource: true,
-        source: "youtube",
-        id: i.id,
-        name: i.title,
-        url: i.url,
-        thumbnail: i.thumbnail,
-        duration: i.isLive ? 0 : toSecond(i.length_seconds),
-        isLive: Boolean(i.isLive),
-        uploader: { name: i.author?.name, url: i.author?.channelID ? `https://www.youtube.com/channel/${i.author.channelID}` : void 0 }
-      }));
-      super({
-        source: "youtube",
-        id: info.id,
-        name: info.title,
-        url: info.url,
-        thumbnail: info.thumbnail?.url,
-        songs
-      }, options);
-    }
 
-    destructor() {
-      this.songs.forEach(song => song.destructor());
-      this.songs.length = 0;
-      super.destructor();
-    }
+  async getRelatedSongs(song) {
+    const related = song.related || (await ytdl.getBasicInfo(song.url, this.ytdlOptions)).related_videos;
+    return related.filter(r => r.id).map(r => new YouTubeRelatedSong(this, r));
   }
-  var YouTubeRelatedSong = class extends Song {
-    constructor(plugin, info) {
-      if (!info.id) throw new DisTubeError("CANNOT_RESOLVE_SONG", info);
-      super({
-        plugin,
-        source: "youtube",
-        playFromSource: true,
-        id: info.id,
-        name: info.title,
-        url: `https://youtu.be/${info.id}`,
-        thumbnail: info.thumbnails?.[0]?.url || null,
-        isLive: Boolean(info.isLive),
-        duration: info.isLive ? 0 : toSecond(info.length_seconds),
-        views: parseNumber(info.view_count),
-        uploader: typeof info.author === "string" ? {
-          name: info.author
-        } : {
-          name: info.author?.name || info.author?.user || null,
-          url: info.author?.channel_url || info.author?.external_channel_url || info.author?.user_url || info.author?.id ? `https://www.youtube.com/channel/${info.author.id}` : info.author?.user ? `https://www.youtube.com/${info.author.user}` : null
-        }
-      });
-    }
 
-    destructor() {
-      this.thumbnail = null;
-      if (this.uploader) {
-        this.uploader.name = null;
-        this.uploader.url = null;
-      }
-      this.uploader = null;
-      super.destructor();
-    }
-  };
+  async searchSong(query, options) {
+    const result = await this.search(query, { type: "video", limit: 1 });
+    if (!result?.[0]) return null;
+    const info = result[0];
+    return new Song({
+      plugin: this,
+      source: "youtube",
+      playFromSource: true,
+      id: info.id,
+      name: info.name,
+      url: info.url,
+      thumbnail: info.thumbnail,
+      duration: info.duration,
+      views: info.views,
+      uploader: info.uploader,
+    }, options);
+  }
 
-  const YouTubeSearchResultSong = class extends Song {
-    static __name = "YouTubeSearchResultSong";
+  async search(query, options = {}) {
+    const { items } = await ytsr(query, {
+      type: "video",
+      limit: 10,
+      safeSearch: false,
+      ...options,
+      requestOptions: { headers: { cookie: this.ytCookie } },
+    });
+    return items.map(i => i.type === "video" ? new YouTubeSearchResultSong(this, i) : new YouTubeSearchResultPlaylist(i));
+  }
+}
 
-    constructor(plugin, { id, name, thumbnail, isLive, duration, views, author }) {
-      super({
-        plugin,
-        source: "youtube",
-        playFromSource: true,
-        id,
-        name,
-        url: `https://youtu.be/${id}`,
-        thumbnail: thumbnail || null,
-        isLive: Boolean(isLive), // Ensure isLive is a boolean
-        duration: toSecond(duration) || duration,
-        views: parseNumber(views),
-        uploader: {
-          name: (author && author.name) || null,
-          url: (author && author.url) ? author.url : null // Defaulting to null if no author URL
-        }
-      });
-    }
+class YouTubeSong extends Song {
+  constructor(plugin, info, options) {
+    const i = info.videoDetails;
+    super({
+      plugin,
+      source: "youtube",
+      playFromSource: true,
+      id: i.videoId,
+      name: i.title,
+      isLive: Boolean(i.isLive),
+      duration: i.isLive ? 0 : toSecond(i.lengthSeconds),
+      url: i.video_url || `https://youtu.be/${i.videoId}`,
+      thumbnail: i.thumbnails?.sort((a, b) => b.width - a.width)?.[0]?.url,
+      views: parseNumber(i.viewCount || i.view_count || i.views),
+      likes: parseNumber(i.likes),
+      uploader: {
+        name: i.author?.name || i.author?.user,
+        url: i.author?.channel_url || i.author?.external_channel_url || i.author?.user_url || i.author?.id ? `https://www.youtube.com/channel/${i.author.id}` : i.author?.user ? `https://www.youtube.com/${i.author.user}` : undefined,
+      },
+      ageRestricted: Boolean(i.age_restricted),
+    }, options);
+    
+    this.chapters = i.chapters || [];
+    this.storyboards = i.storyboards || [];
+    this.related = info.related_videos || [];
+  }
+}
 
-    destructor() {
-      this.id = null;
-      this.name = null;
-      this.url = null;
-      this.thumbnail = null;
-      this.isLive = null;
-      this.duration = null;
-      this.views = null;
-      this.uploader.name = null;
-      this.uploader.url = null;
-      this.uploader = null;
-      super.destructor();
-    }
-  };
-  const YouTubeSearchResultPlaylist = class {
-    static __name = "YouTubeSearchResultPlaylist";
-    /**
-     * YouTube  playlist id
-     */
-    id;
-    /**
-     * Playlist title.
-     */
-    name;
-    /**
-     * Playlist URL.
-     */
-    url;
-    /**
-     * Playlist owner
-     */
-    uploader;
-    /**
-     * Number of videos in the playlist
-     */
-    length;
-    constructor({ id, name, owner }) {
-      this.id = id;
-      this.name = name;
-      this.url = `https://www.youtube.com/playlist?list=${id}`;
-      this.uploader = { name: owner?.name, url: owner?.url };
-    }
-  };
-  export {
-    YouTubePlaylist,
-    ToddysPlugin,
-    YouTubeRelatedSong,
-    YouTubeSearchResultPlaylist,
-    YouTubeSearchResultSong,
-    YouTubeSong
-  };
+class YouTubePlaylist extends Playlist {
+  constructor(plugin, info, options) {
+    const songs = info.items.map(i => new Song({
+      plugin,
+      playFromSource: true,
+      source: "youtube",
+      id: i.id,
+      name: i.title,
+      url: i.url,
+      thumbnail: i.thumbnail,
+      duration: toSecond(i.duration),
+      isLive: Boolean(i.isLive),
+      uploader: {
+        name: i.author?.name,
+        url: i.author?.url || i.author?.channelID ? `https://www.youtube.com/channel/${i.author.channelID}` : undefined,
+      },
+    }));
+    super({
+      source: "youtube",
+      id: info.id,
+      name: info.title,
+      url: info.url,
+      thumbnail: info.thumbnail?.url,
+      songs,
+    }, options);
+  }
+}
+
+class YouTubeRelatedSong extends Song {
+  constructor(plugin, info) {
+    if (!info.id) throw new DisTubeError("CANNOT_RESOLVE_SONG", info);
+    super({
+      plugin,
+      source: "youtube",
+      playFromSource: true,
+      id: info.id,
+      name: info.title,
+      url: `https://youtu.be/${info.id}`,
+      thumbnail: info.thumbnails?.sort((a, b) => b.width - a.width)?.[0]?.url,
+      isLive: Boolean(info.isLive),
+      duration: info.isLive ? 0 : toSecond(info.length_seconds),
+      views: parseNumber(info.view_count),
+      uploader: typeof info.author === "string" ? { name: info.author } : {
+        name: info.author?.name || info.author?.user,
+        url: info.author?.channel_url || info.author?.external_channel_url || info.author?.user_url || info.author?.id ? `https://www.youtube.com/channel/${info.author.id}` : info.author?.user ? `https://www.youtube.com/${info.author.user}` : undefined,
+      },
+    });
+  }
+}
+
+class YouTubeSearchResultSong extends Song {
+  constructor(plugin, info) {
+    super({
+      plugin,
+      source: "youtube",
+      playFromSource: true,
+      id: info.id,
+      name: info.name,
+      url: `https://youtu.be/${info.id}`,
+      thumbnail: info.thumbnail,
+      isLive: info.isLive,
+      duration: toSecond(info.duration),
+      views: parseNumber(info.views),
+      uploader: {
+        name: info.author?.name,
+        url: info.author?.url,
+      },
+    });
+  }
+}
+
+class YouTubeSearchResultPlaylist {
+  constructor(info) {
+    this.id = info.id;
+    this.name = info.name;
+    this.url = `https://www.youtube.com/playlist?list=${info.id}`;
+    this.uploader = {
+      name: info.owner?.name,
+      url: info.owner?.url,
+    };
+    this.length = info.length;
+  }
+}
+
+const SearchResultType = {
+  VIDEO: "video",
+  PLAYLIST: "playlist",
+};
+
+module.exports = {
+  SearchResultType,
+  YouTubePlaylist,
+  YouTubePlugin,
+  YouTubeRelatedSong,
+  YouTubeSearchResultPlaylist,
+  YouTubeSearchResultSong,
+  YouTubeSong,
+};
